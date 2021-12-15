@@ -143,48 +143,88 @@ class MasterWindow(Frame):
             row=5, column=0, columnspan=2, sticky=W + E + N + S, padx=5, pady=5)
 
     def select_parameter(self):
+
         def selected_parameters():
+            """
             selection = self.list_parameters.curselection()
             selection_list = []
             for i in selection:
                 selection_list.append(self.list_parameters.get(i))
             print(selection_list)
             self.entry_var.set(','.join(selection_list))
+            """
             self.select_para_window.destroy()
-        def filter_parameters():
-            pass
+
+        def filter_parameters(listbox):
+            print(listbox)
+            selection = self.lb[listbox]['list'].curselection()
+            print(selection)
+            value_list = [line.strip(' \'') for line in self.lb[listbox]['listvar'].get()[1:-1].split(',')]
+            selected_list = [value_list[index] for index in selection]
+            print(selected_list)
+            next_listbox = self.listboxes[self.listboxes.index(listbox) + 1]
+            new_list = []
+            if selected_list[0] == '[ALL]':
+                selected_list = list(self.ifc.get_elements_by_parameter()[listbox].keys())
+
+            for selected in selected_list:
+                temp_list = self.ifc.get_elements_by_parameter()[listbox][selected][next_listbox]
+                for item in temp_list:
+                    if item not in new_list:
+                        new_list.append(item)
+
+            self.lb[next_listbox]['listvar'].set(value=new_list)
+
 
         self.select_para_window = Toplevel(self.master)
         self.select_para_window.title('select parameter')
-        self.select_para_window.columnconfigure([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], weight=1)
+        self.select_para_window.columnconfigure([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], weight=1)
         self.select_para_window.rowconfigure(0, weight=1)
         self.select_para_window.rowconfigure(1, weight=8)
         self.select_para_window.rowconfigure(2, weight=1)
 
         self.lb = {}
         column_counter = 0
-        listboxes = list(self.ifc.get_elements_by_parameter().keys())
-        for listbox in listboxes:
+        parameter_dict = self.ifc.get_elements_by_parameter()
+        parameter_dict['values'] = {}
+        for k, v in self.ifc.get_elements_by_parameter()['parameters'].items():
+            values_list = parameter_dict['parameters'][k]['values']
+            for val in values_list:
+                if val in parameter_dict['values'].keys():
+                    parameter_dict['values'][val].append(k)
+                else:
+                    parameter_dict['values'][val] = [k]
+
+        self.listboxes = list(parameter_dict.keys())
+        for listbox in self.listboxes:
             self.lb[listbox] = {}
             self.lb[listbox]['label'] = Label(self.select_para_window, text='Select ' + listbox)
-            self.lb[listbox]['label'].grid(row=0,column=column_counter, columnspan=2)
+            self.lb[listbox]['label'].grid(row=0, column=column_counter, columnspan=2)
             self.lb[listbox]['scrollbar'] = Scrollbar(self.select_para_window)
             self.lb[listbox]['scrollbar'].grid(row=1, column=column_counter + 1, sticky=N + S, pady=10)
-            self.lb[listbox]['list'] = Listbox(self.select_para_window, selectmode="multiple", yscrollcommand=self.lb[listbox]['scrollbar'].set)
-            self.lb[listbox]['list'].grid(padx=10, pady=10, row=1, column=column_counter)
+            self.lb[listbox]['listvar'] = StringVar()
+            self.lb[listbox]['list'] = Listbox(
+                self.select_para_window,
+                selectmode="multiple",
+                listvariable=self.lb[listbox]['listvar'],
+                yscrollcommand=self.lb[listbox]['scrollbar'].set
+            )
+            self.lb[listbox]['list'].grid(padx=10, pady=10, row=1, column=column_counter, sticky=N + S + E + W)
             _list = list(self.ifc.get_elements_by_parameter()[listbox].keys())
-            #_list.remove('elements')
-            self.lb[listbox]['list'].insert(0, "[ALL]")
-            for item in range(len(_list)):
-                self.lb[listbox]['list'].insert(END, _list[item])
-                self.lb[listbox]['list'].itemconfig(item)
-            self.lb[listbox]['scrollbar'].config(command=self.lb[listbox]['list'].yview)
+            _list.insert(0, "[ALL]")
+            self.lb[listbox]['listvar'].set(value=_list)
+            print(self.lb[listbox]['listvar'])
+
+
+            if listbox != 'values':
+                self.lb[listbox]['button'] = Button(self.select_para_window, text='->',
+                                                    command=lambda x=listbox: filter_parameters(x))
+                self.lb[listbox]['button'].grid(row=1, column=column_counter+2, padx=2)
+
             column_counter += 3
 
-        self.filterButton = Button(self.select_para_window, text='->', command=filter_parameters)
-        self.filterButton.grid(row=1, column=2, padx=2)
         self.closeButton = Button(self.select_para_window, text='Close', command=selected_parameters)
-        self.closeButton.grid(row=3, column=0, columnspan=9, padx=30, pady=5)
+        self.closeButton.grid(row=3, column=0, columnspan=12, padx=30, pady=5)
 
     def make_assembly(self):
         save_file = asksaveasfilename(title='Save IFC file', defaultextension=".ifc")
