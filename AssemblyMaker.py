@@ -5,6 +5,7 @@ from tkinter import *
 from tkinter.filedialog import askopenfilename, asksaveasfilename
 import os
 from PIL import Image, ImageTk
+import pandas as pd
 
 
 def create_guid():
@@ -18,6 +19,7 @@ class IfcFile():
         self.elements = self.ifc_data.by_type('IfcElement')
         self.types = self.get_all_types()
         self.parameter_dict = None
+        self.element_parameter_table = None
 
     def get_all_types(self):
         get_types = []
@@ -27,12 +29,37 @@ class IfcFile():
                 get_types.append(ifc_type)
         return get_types
 
-    def get_elements_by_parameter(self, element_type=None, pset=None, parameter=None, value=None):
+    def parameter_table(self):
+
+        if self.element_parameter_table is None:
+
+            pandas_dict = {
+                'global_id': [],
+                'types': [],
+                'psets': [],
+                'parameters': [],
+                'values': [],
+            }
+
+            for element in self.elements:
+                psets= ue.get_psets(element)
+                for pset, parameters in psets.items():
+                    for parameter, value in parameters.items():
+                        if value != '':
+                            pandas_dict['global_id'].append(element.GlobalId)
+                            pandas_dict['types'].append(element.__dict__['type'])
+                            pandas_dict['psets'].append(pset)
+                            pandas_dict['parameters'].append(parameter)
+                            pandas_dict['values'].append(value)
+            self.element_parameter_table = pd.DataFrame.from_dict(pandas_dict)
+
+        return self.element_parameter_table
+
+    def get_parameter_info(self, parameter=None):
         if self.parameter_dict is None:
             self.parameter_dict = {'types': {},
                                    'psets': {},
-                                   'parameters': {}
-                                   }
+                                   'parameters': {}}
             for element in self.elements:
                 element_guid = element.GlobalId
                 ele_type = element.__dict__['type']
@@ -62,6 +89,28 @@ class IfcFile():
             return self.parameter_dict['parameters'][parameter]
         else:
             return self.parameter_dict
+
+    def get_elements_by_filter(self, element_types=None, psets=None, parameters=[], values=None):
+        element_dict = self.get_parameter_info()
+        filtered_items = {}
+
+        filter_types = [
+            {'filter': element_types, 'name': 'types', 'next': 'psets'},
+            {'filter': psets, 'name': 'psets', 'next': 'parameters'},
+            {'filter': parameters, 'name': 'parameters', 'next': 'values'},
+            {'filter': values, 'name': 'values', 'next': None}]
+
+        for filter_type in filter_types:
+
+            if filter_type['filter'] is None:
+                filter_type_list = list(element_dict[filter_type['name']].keys())
+            elif isinstance(filter_type['filter'], str):
+                filter_type_list = [filter_type['filter']]
+            else:
+                filter_type_list = filter_type['filter']
+
+            for instance in filter_type_list:
+                pass
 
     def create_assemblies_by_parameter(self, parameter_name: str):
 
@@ -93,7 +142,7 @@ class IfcFile():
             except:
                 pass #skip if attribute not found in class
 
-        found_elements = self.get_elements_by_parameter(parameter_name)
+        found_elements = self.get_parameter_info(parameter_name)
         for assembly, assembly_elements in found_elements.items():
             print(assembly, 'has', len(assembly_elements), 'elements')
             make_assembly(assembly, assembly_elements)
@@ -145,33 +194,23 @@ class MasterWindow(Frame):
     def select_parameter(self):
 
         def selected_parameters():
-            """
-            selection = self.list_parameters.curselection()
-            selection_list = []
-            for i in selection:
-                selection_list.append(self.list_parameters.get(i))
-            print(selection_list)
-            self.entry_var.set(','.join(selection_list))
-            """
+            self.entry_var.set('[SELECTION]')
+            self.entry_parameter.config(state='disabled')
             self.select_para_window.destroy()
 
         def filter_parameters(listbox):
-            print(listbox)
             selection = self.lb[listbox]['list'].curselection()
-            print(selection)
             value_list = [line.strip(' \'') for line in self.lb[listbox]['listvar'].get()[1:-1].split(',')]
             selected_list = [value_list[index] for index in selection]
-            print(selected_list)
             next_listbox = self.listboxes[self.listboxes.index(listbox) + 1]
             new_list = []
-            if selected_list[0] == '[ALL]':
-                selected_list = list(self.ifc.get_elements_by_parameter()[listbox].keys())
-
-            for selected in selected_list:
-                temp_list = self.ifc.get_elements_by_parameter()[listbox][selected][next_listbox]
-                for item in temp_list:
-                    if item not in new_list:
-                        new_list.append(item)
+            if not selected_list:
+                new_list = list(self.ifc.parameter_table()[next_listbox].unique())
+            elif selected_list[0] == '[ALL]':
+                new_list = list(self.ifc.parameter_table()[next_listbox].unique())
+            else:
+                new_list = list(self.ifc.parameter_table()[next_listbox].loc[
+                    self.ifc.parameter_table()[listbox].isin(selected_list)].unique())
 
             self.lb[next_listbox]['listvar'].set(value=new_list)
 
@@ -185,17 +224,8 @@ class MasterWindow(Frame):
 
         self.lb = {}
         column_counter = 0
-        parameter_dict = self.ifc.get_elements_by_parameter()
-        parameter_dict['values'] = {}
-        for k, v in self.ifc.get_elements_by_parameter()['parameters'].items():
-            values_list = parameter_dict['parameters'][k]['values']
-            for val in values_list:
-                if val in parameter_dict['values'].keys():
-                    parameter_dict['values'][val].append(k)
-                else:
-                    parameter_dict['values'][val] = [k]
-
-        self.listboxes = list(parameter_dict.keys())
+        self.listboxes = list(self.ifc.parameter_table().columns)
+        self.listboxes.remove('global_id')
         for listbox in self.listboxes:
             self.lb[listbox] = {}
             self.lb[listbox]['label'] = Label(self.select_para_window, text='Select ' + listbox)
@@ -210,11 +240,9 @@ class MasterWindow(Frame):
                 yscrollcommand=self.lb[listbox]['scrollbar'].set
             )
             self.lb[listbox]['list'].grid(padx=10, pady=10, row=1, column=column_counter, sticky=N + S + E + W)
-            _list = list(self.ifc.get_elements_by_parameter()[listbox].keys())
+            _list = list(self.ifc.parameter_table()[listbox].unique())
             _list.insert(0, "[ALL]")
             self.lb[listbox]['listvar'].set(value=_list)
-            print(self.lb[listbox]['listvar'])
-
 
             if listbox != 'values':
                 self.lb[listbox]['button'] = Button(self.select_para_window, text='->',
@@ -223,7 +251,7 @@ class MasterWindow(Frame):
 
             column_counter += 3
 
-        self.closeButton = Button(self.select_para_window, text='Close', command=selected_parameters)
+        self.closeButton = Button(self.select_para_window, text='Apply', command=selected_parameters)
         self.closeButton.grid(row=3, column=0, columnspan=12, padx=30, pady=5)
 
     def make_assembly(self):
@@ -231,12 +259,13 @@ class MasterWindow(Frame):
         if save_file is None:
             return
         parameters = self.entry_parameter.get()
-        if ',' in parameters:
-            list_parameters = parameters.split(',')
-        else:
-            list_parameters = [parameters]
-        for parameter in list_parameters:
-            self.ifc.create_assemblies_by_parameter(parameter)
+        if parameters != '[SELECTED]':
+            if ',' in parameters:
+                list_parameters = parameters.split(',')
+            else:
+                list_parameters = [parameters]
+            for parameter in list_parameters:
+                self.ifc.create_assemblies_by_parameter(parameter)
         self.ifc.ifc_data.write(save_file)
         print('done')
 
