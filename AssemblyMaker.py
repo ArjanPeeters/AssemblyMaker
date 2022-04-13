@@ -7,6 +7,8 @@ import os
 from PIL import Image, ImageTk
 import pandas as pd
 
+pd.set_option("display.max_rows", None, "display.max_columns", None, "display.max_colwidth", -1, "display.width", None)
+
 
 def create_guid():
     return ifcopenshell.guid.new()
@@ -90,62 +92,80 @@ class IfcFile():
         else:
             return self.parameter_dict
 
-    def get_elements_by_filter(self, element_types=None, psets=None, parameters=[], values=None):
-        element_dict = self.get_parameter_info()
-        filtered_items = {}
+    def get_elements_by_filter(self, parameters: list, **filters):
 
-        filter_types = [
-            {'filter': element_types, 'name': 'types', 'next': 'psets'},
-            {'filter': psets, 'name': 'psets', 'next': 'parameters'},
-            {'filter': parameters, 'name': 'parameters', 'next': 'values'},
-            {'filter': values, 'name': 'values', 'next': None}]
+        if not isinstance(parameters, list):
+            raise TypeError('parameters argument needs to be a list, got {}'.format(type(parameters)))
 
-        for filter_type in filter_types:
+        agreed_args = list(self.parameter_table().columns)
+        for arg in filters.keys():
+            if arg not in agreed_args:
+                raise KeyError('Can not filter on {arg}, must be of {list}'.format(arg=arg, list=agreed_args))
 
-            if filter_type['filter'] is None:
-                filter_type_list = list(element_dict[filter_type['name']].keys())
-            elif isinstance(filter_type['filter'], str):
-                filter_type_list = [filter_type['filter']]
-            else:
-                filter_type_list = filter_type['filter']
+        filters['parameters'] = parameters
+        print(filters)
+        conditions = ''
+        print(self.parameter_table())
+        self.list_to_assemble = {}
 
-            for instance in filter_type_list:
-                pass
+        for column, filter_list in filters.items():
+            if len(filter_list) > 0:
+                conditions = '{column}.isin({list})'.format(column=column, list=filter_list)
+
+                new_df = self.parameter_table().query(conditions)
+                unique_values = list(new_df['values'].unique())
+                print(unique_values)
+                for val in unique_values:
+                    self.list_to_assemble[val] = list(new_df.loc[new_df['values'] == val, 'global_id'])
+        #conditions = conditions[:-3]
+        print(self.list_to_assemble)
+
+        """
+        new_df = self.parameter_table().query(conditions)
+        for column, filterlist in filters.items():
+            if len(filter_list) > 0:
+        
+        guid_list = list(new_df['global_id'])
+        print(guid_list)
+        for guid in guid_list:
+            element = self.ifc_data.by_guid(guid)
+            print(element.Name)
+        """
+
+    def make_assembly(self, p_name, elements):
+        element_assembly = self.ifc_data.createIfcElementAssembly(
+            create_guid(),
+            self.owner_history,
+            'Assembly',
+            None,
+            'Assembly_' + p_name,
+            None,
+            None,
+            None,
+            None,
+            'NOTDEFINED'
+        )
+        self.ifc_data.createIfcRelAggregates(
+            create_guid(),
+            self.owner_history,
+            None,
+            None,
+            element_assembly,
+            elements
+        )
+
+        try:
+            storey = ue.get_container(elements[0])
+            storey.ContainsElements[0].RelatedElements += (element_assembly,)
+        except:
+            pass #skip if attribute not found in class
 
     def create_assemblies_by_parameter(self, parameter_name: str):
-
-        def make_assembly(p_name, elements):
-            element_assembly = self.ifc_data.createIfcElementAssembly(
-                create_guid(),
-                self.owner_history,
-                'Assembly',
-                None,
-                'Assembly_' + p_name,
-                None,
-                None,
-                None,
-                None,
-                'NOTDEFINED'
-            )
-            self.ifc_data.createIfcRelAggregates(
-                create_guid(),
-                self.owner_history,
-                None,
-                None,
-                element_assembly,
-                elements
-            )
-
-            try:
-                storey = ue.get_container(elements[0])
-                storey.ContainsElements[0].RelatedElements += (element_assembly,)
-            except:
-                pass #skip if attribute not found in class
 
         found_elements = self.get_parameter_info(parameter_name)
         for assembly, assembly_elements in found_elements.items():
             print(assembly, 'has', len(assembly_elements), 'elements')
-            make_assembly(assembly, assembly_elements)
+            self.make_assembly(assembly, assembly_elements)
 
 
 class MasterWindow(Frame):
@@ -194,6 +214,20 @@ class MasterWindow(Frame):
     def select_parameter(self):
 
         def selected_parameters():
+            answers = {}
+            for lb in self.listboxes:
+                selection = self.lb[lb]['list'].curselection()
+                value_list = [line.strip(' \'') for line in self.lb[lb]['listvar'].get()[1:-1].split(',')]
+                answers[lb] = [value_list[index] for index in selection]
+
+            parameters = answers.pop('parameters', None)
+            if parameters is None:
+                raise KeyError('At least one parameter should be selected')
+            elif isinstance(parameters, str):
+                parameters = [parameters]
+            else:
+                self.ifc.get_elements_by_filter(parameters, **answers)
+
             self.entry_var.set('[SELECTION]')
             self.entry_parameter.config(state='disabled')
             self.select_para_window.destroy()
@@ -259,13 +293,19 @@ class MasterWindow(Frame):
         if save_file is None:
             return
         parameters = self.entry_parameter.get()
-        if parameters != '[SELECTED]':
+        if parameters != '[SELECTION]':
             if ',' in parameters:
                 list_parameters = parameters.split(',')
             else:
                 list_parameters = [parameters]
             for parameter in list_parameters:
                 self.ifc.create_assemblies_by_parameter(parameter)
+        else:
+            for name, element_ids in self.ifc.list_to_assemble.items():
+                elements = []
+                for element_id in element_ids:
+                    elements.append(self.ifc.ifc_data.by_guid(element_id))
+                self.ifc.make_assembly(name, elements)
         self.ifc.ifc_data.write(save_file)
         print('done')
 
