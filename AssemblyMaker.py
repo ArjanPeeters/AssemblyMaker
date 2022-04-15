@@ -135,9 +135,16 @@ class IfcFile():
         elements = self.element_guids_to_element(element_guids)
 
         e_name = ''
+        types = []
         print('Assembly_{0} has {1} elements'.format(p_name, len(element_guids)))
         for element in elements:
             print("   ", element)
+            if element.is_a()[3:] not in types:
+                types.append(element.is_a()[3:])
+        types_list = ''
+        for t in sorted(types):
+            types_list += t
+
 
 
         element_assembly = self.ifc_data.createIfcElementAssembly(
@@ -145,7 +152,7 @@ class IfcFile():
             self.owner_history,
             'Assembly_' + p_name,
             None,
-            'Assembly',
+            types_list + '_Assembly',
             None,
             None,
             None,
