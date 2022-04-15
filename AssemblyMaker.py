@@ -9,9 +9,10 @@ import pandas as pd
 
 pd.set_option("display.max_rows", None, "display.max_columns", None, "display.max_colwidth", -1, "display.width", None)
 
-
 def create_guid():
     return ifcopenshell.guid.new()
+
+
 
 class IfcFile():
     #class for manipulating the ifc objects
@@ -30,6 +31,15 @@ class IfcFile():
             if ifc_type not in get_types:
                 get_types.append(ifc_type)
         return get_types
+
+    def element_guids_to_element(self, element_guids):
+        if isinstance(element_guids, str):
+            return self.ifc_data.by_guid(element_guids)
+        elif isinstance(element_guids, list):
+            list_of_elements = []
+            for guid in element_guids:
+                list_of_elements.append(self.ifc_data.by_guid(guid))
+            return list_of_elements
 
     def parameter_table(self):
 
@@ -120,25 +130,22 @@ class IfcFile():
         #conditions = conditions[:-3]
         print(self.list_to_assemble)
 
-        """
-        new_df = self.parameter_table().query(conditions)
-        for column, filterlist in filters.items():
-            if len(filter_list) > 0:
-        
-        guid_list = list(new_df['global_id'])
-        print(guid_list)
-        for guid in guid_list:
-            element = self.ifc_data.by_guid(guid)
-            print(element.Name)
-        """
 
-    def make_assembly(self, p_name, elements):
+    def make_assembly(self, p_name, element_guids):
+        elements = self.element_guids_to_element(element_guids)
+
+        e_name = ''
+        print('Assembly_{0} has {1} elements'.format(p_name, len(element_guids)))
+        for element in elements:
+            print("   ", element)
+
+
         element_assembly = self.ifc_data.createIfcElementAssembly(
             create_guid(),
             self.owner_history,
-            'Assembly',
-            None,
             'Assembly_' + p_name,
+            None,
+            'Assembly',
             None,
             None,
             None,
@@ -163,9 +170,10 @@ class IfcFile():
     def create_assemblies_by_parameter(self, parameter_name: str):
 
         found_elements = self.get_parameter_info(parameter_name)
-        for assembly, assembly_elements in found_elements.items():
-            print(assembly, 'has', len(assembly_elements), 'elements')
-            self.make_assembly(assembly, assembly_elements)
+        print(found_elements)
+        for assembly, assembly_element_guids in found_elements['values'].items():
+            print(assembly, 'has', len(assembly_element_guids), 'elements')
+            self.make_assembly(assembly, assembly_element_guids)
 
 
 class MasterWindow(Frame):
@@ -298,16 +306,15 @@ class MasterWindow(Frame):
                 list_parameters = parameters.split(',')
             else:
                 list_parameters = [parameters]
+            print('Parameterselection: ', list_parameters)
             for parameter in list_parameters:
                 self.ifc.create_assemblies_by_parameter(parameter)
         else:
-            for name, element_ids in self.ifc.list_to_assemble.items():
-                elements = []
-                for element_id in element_ids:
-                    elements.append(self.ifc.ifc_data.by_guid(element_id))
-                self.ifc.make_assembly(name, elements)
+            print('Parameterselection: ', self.ifc.list_to_assemble)
+            for name, element_guids in self.ifc.list_to_assemble.items():
+                self.ifc.make_assembly(name, element_guids)
         self.ifc.ifc_data.write(save_file)
-        print('done')
+        print('Saved', save_file)
 
 
 
